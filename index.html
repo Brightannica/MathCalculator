@@ -164,6 +164,9 @@
       const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       const isMobile = isIOS || /Android/i.test(navigator.userAgent);
+      // Force WebGL 1 for all browsers - this build's WebGL 2 shaders are incompatible
+      const forceWebGL1 = window._forceWebGL1 || true;
+      window._forceWebGL1 = true;
 
       function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
@@ -200,12 +203,16 @@
         if (isIOS) {
           baseAttrs.antialias = false;
           baseAttrs.premultipliedAlpha = true;
+          baseAttrs.depth = false;
+          baseAttrs.stencil = false;
         }
 
         return baseAttrs;
       }
 
       function startUnity() {
+        const shouldForceWebGL1 = forceWebGL1 || window._shaderErrorRetried || window._memoryErrorRetried;
+        
         const config = {
           dataUrl: "Build/build.data",
           frameworkUrl: "Build/build.framework.js",
@@ -214,12 +221,28 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
-          webglContextAttributes: getWebGLContextAttributes(),
+          webglContextAttributes: shouldForceWebGL1 ? {
+            preserveDrawingBuffer: true,
+            powerPreference: "low-power",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            premultipliedAlpha: true,
+            majorVersion: 1,
+            minorVersion: 0,
+          } : getWebGLContextAttributes(),
         };
 
-        if (isIOS) {
+        if (isIOS || shouldForceWebGL1) {
           config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
           config.matchWebGLToCanvasSize = false;
+        }
+
+        if (shouldForceWebGL1) {
+          console.log('Using forced WebGL 1 compatibility mode');
+          infoText.textContent = 'Compatibility mode: WebGL 1 forced';
         }
 
         createUnityInstance(canvas, config, (progress) => {
@@ -270,8 +293,40 @@
             } else if (err.message.includes('shader') || err.message.includes('Shader') || err.message.includes('GL.shaders') || err.message.includes('shaderType')) {
               title = 'Shader Compilation Error';
               message = 'Failed to compile shaders. This is a GPU/driver compatibility issue.';
-              details += '\n\nOn iOS: Update iOS to 15.4+, try Private Browsing mode, or use Chrome/Firefox on iOS (they use WebKit).';
-              details += '\nOn desktop: Update graphics drivers, try a different browser, or disable hardware acceleration.';
+              details += '\n\nForcing WebGL 1 compatibility mode for retry...';
+              
+              // Auto-retry with even more restrictive settings for shader errors
+              if (!window._shaderErrorRetried) {
+                window._shaderErrorRetried = true;
+                window._forceWebGL1 = true; // Persist globally
+                console.log('Shader error detected, retrying with forced WebGL 1...');
+                setTimeout(() => retryWithMinimalConfig(), 500);
+                return;
+              }
+            } else if (err.message.includes('Out of bounds memory access') || err.message.includes('out of bounds')) {
+              title = 'Memory Access Error';
+              message = 'Runtime memory access violation. This is a build compatibility issue.';
+              details += '\n\nThe WASM module tried to access invalid memory. Try: refresh page, clear browser cache, or use a different browser.';
+              
+              // Auto-retry with minimal config for memory errors
+              if (!window._memoryErrorRetried) {
+                window._memoryErrorRetried = true;
+                console.log('Memory access error detected, retrying with minimal config...');
+                setTimeout(() => retryWithMinimalConfig(), 500);
+                return;
+              }
+            } else if (err.message.includes('GL.contexts') || err.message.includes('contextHandle') || err.message.includes('GLctx') || err.message.includes('deleteContext') || err.message.includes('destroy_context')) {
+              title = 'WebGL Context Error';
+              message = 'WebGL context management error. This can happen when forcing WebGL version.';
+              details += '\n\nRetrying without WebGL version forcing...';
+              
+              // Clear the force flag and retry normally
+              window._forceWebGL1 = false;
+              window._shaderErrorRetried = false;
+              window._memoryErrorRetried = false;
+              console.log('Context error detected, clearing force flags and retrying...');
+              setTimeout(() => retryLoad(), 500);
+              return;
             }
           }
 
@@ -295,16 +350,55 @@
         document.body.style.overflow = 'hidden';
       }
 
-      canvas.addEventListener('touchstart', (e) => {}, { passive: false });
-      canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-      canvas.addEventListener('touchend', (e) => {}, { passive: false });
+      // Do NOT add custom touch listeners - they interfere with Unity's touch handling
+      // Unity's build.framework.js registers its own touch handlers via JSEvents
 
       window.addEventListener('error', (e) => {
+        if (unityInstance) {
+          // Handle runtime errors after Unity loads
+          if (e.message.includes('Out of bounds memory access') || e.message.includes('out of bounds')) {
+            console.error('Runtime memory access error:', e);
+            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+            window._memoryErrorRetried = true;
+            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', 'This is a build compatibility issue. Forcing WebGL 1 compatibility mode.\n\n' + e.message);
+            setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
+          if (e.message.includes('GL.contexts') || e.message.includes('contextHandle') || e.message.includes('GLctx') || e.message.includes('deleteContext') || e.message.includes('destroy_context')) {
+            console.error('WebGL context destruction error:', e);
+            window._forceWebGL1 = false;
+            window._shaderErrorRetried = false;
+            window._memoryErrorRetried = false;
+            showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', 'Context handle mismatch detected. Clearing compatibility flags.\n\n' + e.message);
+            setTimeout(() => retryLoad(), 500);
+            return;
+          }
+        }
         if (unityInstance) return;
         showError('JavaScript Error', 'An unexpected error occurred.', e.message + '\n' + (e.error?.stack || ''));
       });
 
       window.addEventListener('unhandledrejection', (e) => {
+        if (unityInstance) {
+          const reason = e.reason?.toString() || '';
+          if (reason.includes('Out of bounds memory access') || reason.includes('out of bounds')) {
+            console.error('Runtime memory access rejection:', e.reason);
+            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+            window._memoryErrorRetried = true;
+            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', reason + '\n\nForcing WebGL 1 compatibility mode.');
+            setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
+          if (reason.includes('GL.contexts') || reason.includes('contextHandle') || reason.includes('GLctx') || reason.includes('deleteContext') || reason.includes('destroy_context')) {
+            console.error('WebGL context destruction rejection:', e.reason);
+            window._forceWebGL1 = false;
+            window._shaderErrorRetried = false;
+            window._memoryErrorRetried = false;
+            showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', reason + '\n\nContext handle mismatch detected. Clearing compatibility flags.');
+            setTimeout(() => retryLoad(), 500);
+            return;
+          }
+        }
         if (unityInstance) return;
         showError('Promise Rejection', 'An async operation failed.', e.reason?.toString() || '');
       });
@@ -352,14 +446,16 @@
           console.log('Max varying vectors:', maxVaryingVectors);
           console.log('Is iOS:', isIOS, 'Is Safari:', isSafari);
 
-          // Check for problematic renderers
-          const rendererLower = renderer.toLowerCase();
-          const problematicRenderers = ['swiftshader', 'llvmpipe', 'software', 'mesa'];
-          const isSoftwareRenderer = problematicRenderers.some(r => rendererLower.includes(r));
-          
-          if (isSoftwareRenderer) {
-            console.warn('Software renderer detected:', renderer);
-            infoText.textContent = 'Warning: Software renderer detected - performance may be poor';
+          // Check for problematic renderers (with null checks)
+          if (renderer && typeof renderer === 'string') {
+            const rendererLower = renderer.toLowerCase();
+            const problematicRenderers = ['swiftshader', 'llvmpipe', 'software', 'mesa'];
+            const isSoftwareRenderer = problematicRenderers.some(r => rendererLower.includes(r));
+            
+            if (isSoftwareRenderer) {
+              console.warn('Software renderer detected:', renderer);
+              infoText.textContent = 'Warning: Software renderer detected - performance may be poor';
+            }
           }
 
           if (isIOS) {
@@ -382,6 +478,62 @@
         document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
         document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
         document.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+      }
+
+      function retryWithMinimalConfig() {
+        console.log('Retrying with minimal WebGL 1 config...');
+        loadingScreen.style.display = 'flex';
+        errorScreen.classList.remove('visible');
+        progressBar.style.width = '0%';
+        progressText.textContent = 'Retrying with compatibility mode...';
+        infoText.textContent = 'Using minimal WebGL 1 settings';
+        loadingStartTime = Date.now();
+
+        const minimalConfig = {
+          dataUrl: "Build/build.data",
+          frameworkUrl: "Build/build.framework.js",
+          codeUrl: "Build/build.wasm",
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "LanPiaoPiao",
+          productName: "PlantsVsZombiesRH",
+          productVersion: "1.0",
+          devicePixelRatio: 1,
+          matchWebGLToCanvasSize: false,
+          webglContextAttributes: {
+            preserveDrawingBuffer: true,
+            powerPreference: "low-power",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            premultipliedAlpha: true,
+            majorVersion: 1,
+            minorVersion: 0,
+          },
+        };
+
+        createUnityInstance(canvas, minimalConfig, (progress) => {
+          const percent = Math.round(progress * 100);
+          progressBar.style.width = percent + '%';
+          progressText.textContent = `Compatibility mode: ${percent}%`;
+          const elapsed = ((Date.now() - loadingStartTime) / 1000).toFixed(1);
+          infoText.textContent = `Loaded ${(progress * 180).toFixed(1)}MB of ~180MB • ${elapsed}s elapsed`;
+        }).then((instance) => {
+          unityInstance = instance;
+          loadingScreen.style.display = 'none';
+          gameContainer.style.display = 'block';
+          canvas.focus();
+          canvas.style.background = '#000';
+          if (isMobile) {
+            gameContainer.classList.add('fullscreen');
+            document.body.style.overflow = 'hidden';
+            document.body.style.touchAction = 'none';
+          }
+        }).catch((err) => {
+          console.error('Minimal config also failed:', err);
+          showError('Compatibility Mode Failed', 'Even minimal WebGL 1 settings failed. This build may require WebGL 2 features not supported on this device.', err.toString() + '\n\nTry: Update iOS to 15.4+, use Private Browsing, or play on desktop browser.');
+        });
       }
 
       if (checkWebGLSupport()) {
