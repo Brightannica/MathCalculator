@@ -401,14 +401,16 @@
           console.log('Max varying vectors:', maxVaryingVectors);
           console.log('Is iOS:', isIOS, 'Is Safari:', isSafari);
 
-          // Check for problematic renderers
-          const rendererLower = renderer.toLowerCase();
-          const problematicRenderers = ['swiftshader', 'llvmpipe', 'software', 'mesa'];
-          const isSoftwareRenderer = problematicRenderers.some(r => rendererLower.includes(r));
-          
-          if (isSoftwareRenderer) {
-            console.warn('Software renderer detected:', renderer);
-            infoText.textContent = 'Warning: Software renderer detected - performance may be poor';
+          // Check for problematic renderers (with null checks)
+          if (renderer && typeof renderer === 'string') {
+            const rendererLower = renderer.toLowerCase();
+            const problematicRenderers = ['swiftshader', 'llvmpipe', 'software', 'mesa'];
+            const isSoftwareRenderer = problematicRenderers.some(r => rendererLower.includes(r));
+            
+            if (isSoftwareRenderer) {
+              console.warn('Software renderer detected:', renderer);
+              infoText.textContent = 'Warning: Software renderer detected - performance may be poor';
+            }
           }
 
           if (isIOS) {
