@@ -327,6 +327,18 @@
               console.log('Context error detected, clearing force flags and retrying...');
               setTimeout(() => retryLoad(), 500);
               return;
+            } else if (err.message.includes('dst.entries') || err.message.includes('reconcile') || err.message.includes('IndexedDB') || err.message.includes('idbfs')) {
+              title = 'Data Persistence Error';
+              message = 'Failed to initialize game data storage (IndexedDB).';
+              details += '\n\nThis can happen in Private Browsing or if storage is full/blocked. Retrying with storage disabled...';
+              
+              // Retry with IndexedDB disabled
+              if (!window._idbErrorRetried) {
+                window._idbErrorRetried = true;
+                console.log('IndexedDB error detected, retrying with storage disabled...');
+                setTimeout(() => retryWithMinimalConfig(), 500);
+                return;
+              }
             }
           }
 
@@ -373,6 +385,13 @@
             setTimeout(() => retryLoad(), 500);
             return;
           }
+          if (e.message.includes('dst.entries') || e.message.includes('reconcile') || e.message.includes('IndexedDB') || e.message.includes('idbfs')) {
+            console.error('IndexedDB/persistence error:', e);
+            window._idbErrorRetried = true;
+            showError('Data Persistence Error', 'Game data storage error. Retrying with storage disabled...', 'IndexedDB unavailable (Private Browsing or storage blocked).\n\n' + e.message);
+            setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
         }
         if (unityInstance) return;
         showError('JavaScript Error', 'An unexpected error occurred.', e.message + '\n' + (e.error?.stack || ''));
@@ -396,6 +415,13 @@
             window._memoryErrorRetried = false;
             showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', reason + '\n\nContext handle mismatch detected. Clearing compatibility flags.');
             setTimeout(() => retryLoad(), 500);
+            return;
+          }
+          if (reason.includes('dst.entries') || reason.includes('reconcile') || reason.includes('IndexedDB') || reason.includes('idbfs')) {
+            console.error('IndexedDB/persistence rejection:', e.reason);
+            window._idbErrorRetried = true;
+            showError('Data Persistence Error', 'Game data storage error. Retrying with storage disabled...', 'IndexedDB unavailable (Private Browsing or storage blocked).\n\n' + reason);
+            setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
         }
