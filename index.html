@@ -168,18 +168,6 @@
       const forceWebGL1 = window._forceWebGL1 || (isIOS || isSafari);
       if (forceWebGL1) window._forceWebGL1 = true;
 
-      // Aggressively block WebGL 2 context creation at the browser level
-      if (forceWebGL1) {
-        const originalGetContext = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
-          if (type === 'webgl2' || type === 'experimental-webgl2') {
-            console.log('Blocking WebGL 2 request, falling back to WebGL 1');
-            return originalGetContext.call(this, 'webgl', attrs) || originalGetContext.call(this, 'experimental-webgl', attrs);
-          }
-          return originalGetContext.call(this, type, attrs);
-        };
-      }
-
       function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
         gameContainer.style.display = 'none';
@@ -376,6 +364,15 @@
             setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
+          if (e.message.includes('GL.contexts') || e.message.includes('contextHandle') || e.message.includes('GLctx') || e.message.includes('deleteContext') || e.message.includes('destroy_context')) {
+            console.error('WebGL context destruction error:', e);
+            window._forceWebGL1 = false;
+            window._shaderErrorRetried = false;
+            window._memoryErrorRetried = false;
+            showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', 'Context handle mismatch detected. Clearing compatibility flags.\n\n' + e.message);
+            setTimeout(() => retryLoad(), 500);
+            return;
+          }
         }
         if (unityInstance) return;
         showError('JavaScript Error', 'An unexpected error occurred.', e.message + '\n' + (e.error?.stack || ''));
@@ -390,6 +387,15 @@
             window._memoryErrorRetried = true;
             showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', reason + '\n\nForcing WebGL 1 compatibility mode.');
             setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
+          if (reason.includes('GL.contexts') || reason.includes('contextHandle') || reason.includes('GLctx') || reason.includes('deleteContext') || reason.includes('destroy_context')) {
+            console.error('WebGL context destruction rejection:', e.reason);
+            window._forceWebGL1 = false;
+            window._shaderErrorRetried = false;
+            window._memoryErrorRetried = false;
+            showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', reason + '\n\nContext handle mismatch detected. Clearing compatibility flags.');
+            setTimeout(() => retryLoad(), 500);
             return;
           }
         }
