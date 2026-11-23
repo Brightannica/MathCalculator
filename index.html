@@ -3,38 +3,367 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>Unity WebGL Player | PlantsVsZombiesRH</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { touch-action: none; overscroll-behavior: none; }
+      body {
+        background: #1a1a1a;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+        height: 100%;
+      }
+      #loading-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        width: 100%;
+        max-width: 960px;
+        padding: 20px;
+        z-index: 10;
+      }
+      #game-container {
+        display: none;
+        width: 960px;
+        height: 600px;
+        position: relative;
+      }
+      #game-container.fullscreen {
+        width: 100vw;
+        width: -webkit-fill-available;
+        height: 100vh;
+        height: -webkit-fill-available;
+        max-width: none;
+        max-height: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+      }
+      #unity-canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #000;
+        touch-action: none;
+      }
+      .logo {
+        font-size: 32px;
+        font-weight: bold;
+        color: #4CAF50;
+        letter-spacing: 2px;
+      }
+      .progress-bar-container {
+        width: 100%;
+        max-width: 600px;
+        height: 8px;
+        background: #333;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .progress-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #4CAF50, #8BC34A);
+        border-radius: 4px;
+        transition: width 0.3s ease;
+      }
+      .progress-text {
+        font-size: 14px;
+        color: #aaa;
+      }
+      .error-screen {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 40px;
+        text-align: center;
+        max-width: 600px;
+        z-index: 20;
+      }
+      .error-screen.visible { display: flex; }
+      .error-icon { font-size: 48px; }
+      .error-title { font-size: 24px; color: #f44336; }
+      .error-message { color: #ccc; font-size: 14px; line-height: 1.6; }
+      .error-details { background: #222; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 12px; color: #888; max-height: 200px; overflow: auto; text-align: left; width: 100%; }
+      .retry-btn {
+        padding: 12px 32px;
+        background: #4CAF50;
+        border: none;
+        border-radius: 4px;
+        color: white;
+        font-size: 16px;
+        cursor: pointer;
+        -webkit-appearance: none;
+        transition: background 0.2s;
+      }
+      .retry-btn:hover { background: #45a049; }
+      .info-text { color: #666; font-size: 12px; margin-top: 10px; }
+      @media (max-width: 960px) {
+        #game-container { width: 100vw; width: -webkit-fill-available; height: 100vh; height: -webkit-fill-available; }
+        #loading-screen { max-width: 100vw; padding: 10px; }
+        .logo { font-size: 24px; }
+      }
+      @supports (-webkit-touch-callout: none) {
+        body { min-height: -webkit-fill-available; }
+        #game-container.fullscreen { height: -webkit-fill-available; width: -webkit-fill-available; }
+      }
+    </style>
   </head>
-  <body style="text-align: center; padding: 0; border: 0; margin: 0;">
-    <canvas id="unity-canvas" width=960 height=600 tabindex="-1" style="width: 960px; height: 600px; background: #000000"></canvas>
+  <body>
+    <div id="loading-screen">
+      <div class="logo">Plants vs Zombies RH</div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="progress-text" id="progress-text">Initializing...</div>
+      <div class="info-text" id="info-text">Loading game assets (~180MB)...</div>
+    </div>
+
+    <div id="error-screen" class="error-screen">
+      <div class="error-icon">⚠</div>
+      <div class="error-title" id="error-title">Failed to Load</div>
+      <div class="error-message" id="error-message"></div>
+      <div class="error-details" id="error-details"></div>
+      <button class="retry-btn" onclick="retryLoad()">Retry</button>
+    </div>
+
+    <div id="game-container">
+      <canvas id="unity-canvas" tabindex="-1"></canvas>
+    </div>
+
     <script src="Build/build.loader.js"></script>
     <script>
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile device style: fill the whole browser client area with the game canvas:
-        var meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(meta);
+      const loadingScreen = document.getElementById('loading-screen');
+      const gameContainer = document.getElementById('game-container');
+      const errorScreen = document.getElementById('error-screen');
+      const progressBar = document.getElementById('progress-bar');
+      const progressText = document.getElementById('progress-text');
+      const infoText = document.getElementById('info-text');
+      const errorTitle = document.getElementById('error-title');
+      const errorMessage = document.getElementById('error-message');
+      const errorDetails = document.getElementById('error-details');
+      const canvas = document.getElementById('unity-canvas');
 
-        var canvas = document.querySelector("#unity-canvas");
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
-        canvas.style.position = "fixed";
+      let unityInstance = null;
+      let loadingStartTime = Date.now();
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const isMobile = isIOS || /Android/i.test(navigator.userAgent);
 
-        document.body.style.textAlign = "left";
+      function showError(title, message, details = '') {
+        loadingScreen.style.display = 'none';
+        gameContainer.style.display = 'none';
+        errorScreen.classList.add('visible');
+        errorTitle.textContent = title;
+        errorMessage.textContent = message;
+        errorDetails.textContent = details;
       }
 
-      createUnityInstance(document.querySelector("#unity-canvas"), {
-        dataUrl: "Build/build.data",
-        frameworkUrl: "Build/build.framework.js",
-        codeUrl: "Build/build.wasm",
-        streamingAssetsUrl: "StreamingAssets",
-        companyName: "LanPiaoPiao",
-        productName: "PlantsVsZombiesRH",
-        productVersion: "1.0",
-        // matchWebGLToCanvasSize: false, // Uncomment this to separately control WebGL canvas render size and DOM element size.
-        // devicePixelRatio: 1, // Uncomment this to override low DPI rendering on high DPI displays.
+      function retryLoad() {
+        errorScreen.classList.remove('visible');
+        loadingScreen.style.display = 'flex';
+        gameContainer.style.display = 'none';
+        progressBar.style.width = '0%';
+        progressText.textContent = 'Initializing...';
+        infoText.textContent = 'Retrying...';
+        loadingStartTime = Date.now();
+        startUnity();
+      }
+
+      function getWebGLContextAttributes() {
+        const baseAttrs = {
+          preserveDrawingBuffer: true,
+          powerPreference: isIOS ? "low-power" : "high-performance",
+          failIfMajorPerformanceCaveat: false,
+          alpha: false,
+          antialias: !isIOS,
+          depth: true,
+          stencil: false,
+          premultipliedAlpha: false,
+        };
+
+        if (isIOS) {
+          baseAttrs.antialias = false;
+          baseAttrs.premultipliedAlpha = true;
+        }
+
+        return baseAttrs;
+      }
+
+      function startUnity() {
+        const config = {
+          dataUrl: "Build/build.data",
+          frameworkUrl: "Build/build.framework.js",
+          codeUrl: "Build/build.wasm",
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "LanPiaoPiao",
+          productName: "PlantsVsZombiesRH",
+          productVersion: "1.0",
+          webglContextAttributes: getWebGLContextAttributes(),
+        };
+
+        if (isIOS) {
+          config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        }
+
+        createUnityInstance(canvas, config, (progress) => {
+          const percent = Math.round(progress * 100);
+          progressBar.style.width = percent + '%';
+          progressText.textContent = `Loading... ${percent}%`;
+          const elapsed = ((Date.now() - loadingStartTime) / 1000).toFixed(1);
+          infoText.textContent = `Loaded ${(progress * 180).toFixed(1)}MB of ~180MB • ${elapsed}s elapsed`;
+        }).then((instance) => {
+          unityInstance = instance;
+          loadingScreen.style.display = 'none';
+          gameContainer.style.display = 'block';
+          canvas.focus();
+          canvas.style.background = '#000';
+
+          if (isMobile) {
+            gameContainer.classList.add('fullscreen');
+            document.body.style.overflow = 'hidden';
+            document.body.style.touchAction = 'none';
+          }
+
+          setTimeout(() => {
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+          }, 100);
+        }).catch((err) => {
+          console.error('Unity load error:', err);
+          let title = 'Failed to Load';
+          let message = 'The game failed to load. See details below.';
+          let details = err.toString();
+
+          if (err && err.message) {
+            if (err.message.includes('wasm')) {
+              title = 'WebAssembly Error';
+              message = 'WebAssembly compilation failed. Try refreshing or use a different browser.';
+            } else if (err.message.includes('memory') || err.message.includes('Memory')) {
+              title = 'Out of Memory';
+              message = 'Not enough memory. iOS Safari has strict limits. Try: close other tabs, restart Safari, or free up device storage.';
+              if (isIOS) {
+                details += '\n\niOS Safari memory limit: ~1-2GB. This game needs ~500MB+. Close all other tabs and apps.';
+              }
+            } else if (err.message.includes('WebGL') || err.message.includes('webgl')) {
+              title = 'WebGL Error';
+              message = 'WebGL context creation failed. On iOS: ensure iOS 15+, try Private Browsing, or reset Safari settings.';
+            } else if (err.message.includes('fetch') || err.message.includes('network') || err.message.includes('404')) {
+              title = 'Network Error';
+              message = 'Failed to download game files. Check connection and try again.';
+            } else if (err.message.includes('shader') || err.message.includes('Shader') || err.message.includes('GL.shaders') || err.message.includes('shaderType')) {
+              title = 'Shader Compilation Error';
+              message = 'Failed to compile shaders. This is a GPU/driver compatibility issue.';
+              details += '\n\nOn iOS: Update iOS, try Private Browsing mode, or use Chrome/Firefox on iOS (they use WebKit).';
+            }
+          }
+
+          showError(title, message, details);
+        });
+      }
+
+      if (isMobile) {
+        const meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=yes';
+        document.head.appendChild(meta);
+
+        document.documentElement.style.height = '-webkit-fill-available';
+        document.body.style.height = '-webkit-fill-available';
+        document.body.style.width = '-webkit-fill-available';
+
+        gameContainer.classList.add('fullscreen');
+        document.body.style.textAlign = 'left';
+        document.body.style.touchAction = 'none';
+        document.body.style.overflow = 'hidden';
+      }
+
+      canvas.addEventListener('touchstart', (e) => {}, { passive: false });
+      canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+      canvas.addEventListener('touchend', (e) => {}, { passive: false });
+
+      window.addEventListener('error', (e) => {
+        if (unityInstance) return;
+        showError('JavaScript Error', 'An unexpected error occurred.', e.message + '\n' + (e.error?.stack || ''));
       });
+
+      window.addEventListener('unhandledrejection', (e) => {
+        if (unityInstance) return;
+        showError('Promise Rejection', 'An async operation failed.', e.reason?.toString() || '');
+      });
+
+      canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        console.error('WebGL context lost:', e);
+        if (unityInstance) {
+          showError('WebGL Context Lost', 'Graphics context lost. iOS may reclaim memory under pressure.', 'Close other tabs/apps and refresh. Avoid switching apps during play.');
+        }
+      }, false);
+
+      canvas.addEventListener('webglcontextrestored', (e) => {
+        console.log('WebGL context restored');
+        if (unityInstance) {
+          setTimeout(() => retryLoad(), 100);
+        }
+      }, false);
+
+      function checkWebGLSupport() {
+        try {
+          const testCanvas = document.createElement('canvas');
+          const gl2 = testCanvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
+          const gl1 = testCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false }) ||
+                     testCanvas.getContext('experimental-webgl', { failIfMajorPerformanceCaveat: false });
+          const gl = isIOS ? (gl1 || gl2) : (gl2 || gl1);
+
+          if (!gl) {
+            showError('WebGL Not Supported', 'Your browser does not support WebGL.', 'iOS 15+ required. Update iOS or try a different browser.');
+            return false;
+          }
+
+          console.log('WebGL version:', gl.getParameter(gl.VERSION));
+          console.log('WebGL renderer:', gl.getParameter(gl.RENDERER));
+          console.log('WebGL vendor:', gl.getParameter(gl.VENDOR));
+          console.log('Max texture size:', gl.getParameter(gl.MAX_TEXTURE_SIZE));
+          console.log('Is iOS:', isIOS, 'Is Safari:', isSafari);
+
+          if (isIOS) {
+            const maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+            if (maxTexSize < 4096) {
+              console.warn('Low max texture size:', maxTexSize, '- may cause issues');
+            }
+          }
+
+          return true;
+        } catch (e) {
+          showError('WebGL Error', 'Failed to create WebGL context.', e.toString());
+          return false;
+        }
+      }
+
+      if (isIOS) {
+        document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+        document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+        document.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+      }
+
+      if (checkWebGLSupport()) {
+        startUnity();
+      }
     </script>
   </body>
 </html>
