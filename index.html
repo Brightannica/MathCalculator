@@ -164,9 +164,9 @@
       const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       const isMobile = isIOS || /Android/i.test(navigator.userAgent);
-      // Force WebGL 1 globally after any shader error - persists across retries
-      const forceWebGL1 = window._forceWebGL1 || (isIOS || isSafari);
-      if (forceWebGL1) window._forceWebGL1 = true;
+      // Force WebGL 1 for all browsers - this build's WebGL 2 shaders are incompatible
+      const forceWebGL1 = window._forceWebGL1 || true;
+      window._forceWebGL1 = true;
 
       function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
