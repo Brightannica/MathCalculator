@@ -164,6 +164,21 @@
       const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       const isMobile = isIOS || /Android/i.test(navigator.userAgent);
+      // Force WebGL 1 globally after any shader error - persists across retries
+      const forceWebGL1 = window._forceWebGL1 || (isIOS || isSafari);
+      if (forceWebGL1) window._forceWebGL1 = true;
+
+      // Aggressively block WebGL 2 context creation at the browser level
+      if (forceWebGL1) {
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          if (type === 'webgl2' || type === 'experimental-webgl2') {
+            console.log('Blocking WebGL 2 request, falling back to WebGL 1');
+            return originalGetContext.call(this, 'webgl', attrs) || originalGetContext.call(this, 'experimental-webgl', attrs);
+          }
+          return originalGetContext.call(this, type, attrs);
+        };
+      }
 
       function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
@@ -208,6 +223,8 @@
       }
 
       function startUnity() {
+        const shouldForceWebGL1 = forceWebGL1 || window._shaderErrorRetried || window._memoryErrorRetried;
+        
         const config = {
           dataUrl: "Build/build.data",
           frameworkUrl: "Build/build.framework.js",
@@ -216,12 +233,28 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
-          webglContextAttributes: getWebGLContextAttributes(),
+          webglContextAttributes: shouldForceWebGL1 ? {
+            preserveDrawingBuffer: true,
+            powerPreference: "low-power",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            premultipliedAlpha: true,
+            majorVersion: 1,
+            minorVersion: 0,
+          } : getWebGLContextAttributes(),
         };
 
-        if (isIOS) {
+        if (isIOS || shouldForceWebGL1) {
           config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
           config.matchWebGLToCanvasSize = false;
+        }
+
+        if (shouldForceWebGL1) {
+          console.log('Using forced WebGL 1 compatibility mode');
+          infoText.textContent = 'Compatibility mode: WebGL 1 forced';
         }
 
         createUnityInstance(canvas, config, (progress) => {
@@ -337,7 +370,10 @@
           // Handle runtime errors after Unity loads
           if (e.message.includes('Out of bounds memory access') || e.message.includes('out of bounds')) {
             console.error('Runtime memory access error:', e);
-            showError('Runtime Memory Error', 'Memory access violation during gameplay.', 'This is a build compatibility issue. Try refreshing or using a different browser.\n\n' + e.message);
+            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+            window._memoryErrorRetried = true;
+            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', 'This is a build compatibility issue. Forcing WebGL 1 compatibility mode.\n\n' + e.message);
+            setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
         }
@@ -350,7 +386,10 @@
           const reason = e.reason?.toString() || '';
           if (reason.includes('Out of bounds memory access') || reason.includes('out of bounds')) {
             console.error('Runtime memory access rejection:', e.reason);
-            showError('Runtime Memory Error', 'Memory access violation during gameplay.', reason);
+            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+            window._memoryErrorRetried = true;
+            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', reason + '\n\nForcing WebGL 1 compatibility mode.');
+            setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
         }
