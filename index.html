@@ -193,7 +193,7 @@
           alpha: false,
           antialias: !isIOS,
           depth: true,
-          stencil: false,
+          stencil: true,
           premultipliedAlpha: false,
         };
 
@@ -219,6 +219,7 @@
 
         if (isIOS) {
           config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+          config.matchWebGLToCanvasSize = false;
         }
 
         createUnityInstance(canvas, config, (progress) => {
@@ -269,7 +270,8 @@
             } else if (err.message.includes('shader') || err.message.includes('Shader') || err.message.includes('GL.shaders') || err.message.includes('shaderType')) {
               title = 'Shader Compilation Error';
               message = 'Failed to compile shaders. This is a GPU/driver compatibility issue.';
-              details += '\n\nOn iOS: Update iOS, try Private Browsing mode, or use Chrome/Firefox on iOS (they use WebKit).';
+              details += '\n\nOn iOS: Update iOS to 15.4+, try Private Browsing mode, or use Chrome/Firefox on iOS (they use WebKit).';
+              details += '\nOn desktop: Update graphics drivers, try a different browser, or disable hardware acceleration.';
             }
           }
 
@@ -335,16 +337,37 @@
             return false;
           }
 
-          console.log('WebGL version:', gl.getParameter(gl.VERSION));
-          console.log('WebGL renderer:', gl.getParameter(gl.RENDERER));
-          console.log('WebGL vendor:', gl.getParameter(gl.VENDOR));
-          console.log('Max texture size:', gl.getParameter(gl.MAX_TEXTURE_SIZE));
+          const version = gl.getParameter(gl.VERSION);
+          const renderer = gl.getParameter(gl.RENDERER);
+          const vendor = gl.getParameter(gl.VENDOR);
+          const maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+          const maxVertexAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+          const maxVaryingVectors = gl.getParameter(gl.MAX_VARYING_VECTORS);
+
+          console.log('WebGL version:', version);
+          console.log('WebGL renderer:', renderer);
+          console.log('WebGL vendor:', vendor);
+          console.log('Max texture size:', maxTexSize);
+          console.log('Max vertex attribs:', maxVertexAttribs);
+          console.log('Max varying vectors:', maxVaryingVectors);
           console.log('Is iOS:', isIOS, 'Is Safari:', isSafari);
 
+          // Check for problematic renderers
+          const rendererLower = renderer.toLowerCase();
+          const problematicRenderers = ['swiftshader', 'llvmpipe', 'software', 'mesa'];
+          const isSoftwareRenderer = problematicRenderers.some(r => rendererLower.includes(r));
+          
+          if (isSoftwareRenderer) {
+            console.warn('Software renderer detected:', renderer);
+            infoText.textContent = 'Warning: Software renderer detected - performance may be poor';
+          }
+
           if (isIOS) {
-            const maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
             if (maxTexSize < 4096) {
               console.warn('Low max texture size:', maxTexSize, '- may cause issues');
+            }
+            if (!version.includes('WebGL 2') && !version.includes('OpenGL ES 3')) {
+              console.log('WebGL 2 not available, will force WebGL 1');
             }
           }
 
