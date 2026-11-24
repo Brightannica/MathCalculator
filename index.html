@@ -215,13 +215,11 @@
 
       // Disable IndexedDB/IDBFS to prevent memory corruption from failed sync
       // This prevents the "Out of bounds memory access" in touchEventHandlerFunc
-      // which is caused by IDBFS reconcile writing to invalid memory
       (function() {
         // Override IDBFactory to return null (disables IndexedDB)
         if (window.indexedDB) {
           var origOpen = window.indexedDB.open;
           window.indexedDB.open = function() {
-            // Return a fake request that immediately errors
             var req = { onerror: null, onsuccess: null, result: null, error: new Error('IndexedDB disabled') };
             setTimeout(function() {
               if (req.onerror) {
@@ -232,6 +230,10 @@
             return req;
           };
         }
+        // Also override unityFileSystemInit to be a no-op
+        window.unityFileSystemInit = function() {
+          console.log('IDBFS disabled - using memory-only filesystem');
+        };
       })();
 
       // iOS Safari optimizations
@@ -288,6 +290,9 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
+          unityFileSystemInit: function() {
+            console.log('IDBFS disabled - using memory-only filesystem');
+          },
         };
 
         if (isIOS) {
