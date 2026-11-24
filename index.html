@@ -146,10 +146,49 @@
       <canvas id="unity-canvas" tabindex="-1"></canvas>
     </div>
 
-    <!-- Script 1: Loader script (standard Unity approach) -->
+    <!-- Script 1: CRITICAL patches applied BEFORE loader loads -->
+    <script>
+      // CRITICAL: Patch WebGL createShader to never return null
+      // This fixes: TypeError: null is not an object (evaluating 'GL.shaders[id].shaderType=...')
+      // Unity's _glCreateShader doesn't check if createShader returns null
+      (function() {
+        var patchContext = function(proto) {
+          if (!proto || !proto.createShader) return;
+          var origCreateShader = proto.createShader;
+          proto.createShader = function(type) {
+            var shader = origCreateShader.call(this, type);
+            if (!shader) {
+              // createShader returned null - return a dummy to prevent null dereference
+              // Unity will try to compile it and log an error, but won't crash
+              try {
+                return origCreateShader.call(this, this.VERTEX_SHADER);
+              } catch (e) {
+                return null;
+              }
+            }
+            return shader;
+          };
+        };
+        patchContext(WebGLRenderingContext.prototype);
+        if (typeof WebGL2RenderingContext !== 'undefined') {
+          patchContext(WebGL2RenderingContext.prototype);
+        }
+      })();
+
+      // iOS Safari optimizations
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const isMobile = isIOS || /Android/i.test(navigator.userAgent);
+
+      // Retry tracking
+      window._retryCount = window._retryCount || 0;
+      const MAX_RETRIES = 3;
+    </script>
+
+    <!-- Script 2: Loader script -->
     <script src="Build/build.loader.js"></script>
-    
-    <!-- Script 2: Initialization -->
+
+    <!-- Script 3: Initialization -->
     <script>
       const loadingScreen = document.getElementById('loading-screen');
       const gameContainer = document.getElementById('game-container');
@@ -164,9 +203,6 @@
 
       let unityInstance = null;
       let loadingStartTime = Date.now();
-      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      const isMobile = isIOS || /Android/i.test(navigator.userAgent);
 
       function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
