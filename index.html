@@ -113,6 +113,44 @@
       }
       .retry-btn:hover { background: #45a049; }
       .info-text { color: #666; font-size: 12px; margin-top: 10px; }
+      #debug-panel {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 40vh;
+        background: rgba(0,0,0,0.95);
+        color: #0f0;
+        font-family: monospace;
+        font-size: 11px;
+        padding: 10px;
+        overflow-y: auto;
+        z-index: 1000;
+        border-top: 2px solid #4CAF50;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      #debug-panel.visible { display: block; }
+      #debug-toggle {
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        z-index: 1001;
+        background: #333;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        -webkit-appearance: none;
+      }
+      #debug-toggle:hover { background: #444; }
+      .debug-line { margin-bottom: 2px; border-bottom: 1px solid #222; padding-bottom: 2px; }
+      .debug-error { color: #f44; }
+      .debug-warn { color: #fa0; }
+      .debug-info { color: #0af; }
       @media (max-width: 960px) {
         #game-container { width: 100vw; width: -webkit-fill-available; height: 100vh; height: -webkit-fill-available; }
         #loading-screen { max-width: 100vw; padding: 10px; }
@@ -145,6 +183,9 @@
     <div id="game-container">
       <canvas id="unity-canvas" tabindex="-1"></canvas>
     </div>
+
+    <button id="debug-toggle" onclick="toggleDebug()">Show Logs</button>
+    <div id="debug-panel"></div>
 
     <!-- Script 1: CRITICAL patches applied BEFORE loader loads -->
     <script>
@@ -405,6 +446,84 @@
       if (checkWebGLSupport()) {
         startUnity();
       }
+
+      // Debug panel - capture console output for diagnosis without devtools
+      const debugPanel = document.getElementById('debug-panel');
+      const debugToggle = document.getElementById('debug-toggle');
+      const debugLogs = [];
+      const MAX_DEBUG_LINES = 200;
+
+      function toggleDebug() {
+        debugPanel.classList.toggle('visible');
+        debugToggle.textContent = debugPanel.classList.contains('visible') ? 'Hide Logs' : 'Show Logs';
+        if (debugPanel.classList.contains('visible')) {
+          renderDebugLogs();
+        }
+      }
+
+      function addDebugLog(type, args) {
+        const msg = Array.from(args).map(a => {
+          try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+          catch (e) { return String(a); }
+        }).join(' ');
+        
+        debugLogs.push({ type, msg, time: new Date().toLocaleTimeString() });
+        if (debugLogs.length > MAX_DEBUG_LINES) debugLogs.shift();
+        
+        if (debugPanel.classList.contains('visible')) {
+          renderDebugLogs();
+        }
+      }
+
+      function renderDebugLogs() {
+        debugPanel.innerHTML = debugLogs.map(log => {
+          const cls = log.type === 'error' ? 'debug-error' : log.type === 'warn' ? 'debug-warn' : 'debug-info';
+          return `<div class="debug-line ${cls}">[${log.time}] ${escapeHtml(log.msg)}</div>`;
+        }).join('');
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // Override console methods to capture output
+      const origLog = console.log;
+      const origError = console.error;
+      const origWarn = console.warn;
+      
+      console.log = function(...args) {
+        addDebugLog('log', args);
+        return origLog.apply(this, args);
+      };
+      console.error = function(...args) {
+        addDebugLog('error', args);
+        return origError.apply(this, args);
+      };
+      console.warn = function(...args) {
+        addDebugLog('warn', args);
+        return origWarn.apply(this, args);
+      };
+
+      // Capture unhandled errors
+      window.addEventListener('error', (e) => {
+        addDebugLog('error', [`UNCAUGHT: ${e.message}`, e.error?.stack || '']);
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        addDebugLog('error', [`UNHANDLED REJECTION: ${e.reason}`]);
+      });
+
+      // Define debug panel variables
+      const dbgIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const dbgSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const dbgMobile = dbgIOS || /Android/i.test(navigator.userAgent);
+
+      // Initial log
+      addDebugLog('log', ['Debug panel initialized. Logs will appear here.']);
+      addDebugLog('log', [`User Agent: ${navigator.userAgent}`]);
+      addDebugLog('log', [`iOS: ${dbgIOS}, Safari: ${dbgSafari}, Mobile: ${dbgMobile}`]);
     </script>
   </body>
 </html>
