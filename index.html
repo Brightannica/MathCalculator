@@ -146,29 +146,51 @@
       <canvas id="unity-canvas" tabindex="-1"></canvas>
     </div>
 
-    <script src="Build/build.loader.js"></script>
+    <script src="Build/build.loader.js" onload="initUnity()" onerror="loaderError()"></script>
     <script>
-      const loadingScreen = document.getElementById('loading-screen');
-      const gameContainer = document.getElementById('game-container');
-      const errorScreen = document.getElementById('error-screen');
-      const progressBar = document.getElementById('progress-bar');
-      const progressText = document.getElementById('progress-text');
-      const infoText = document.getElementById('info-text');
-      const errorTitle = document.getElementById('error-title');
-      const errorMessage = document.getElementById('error-message');
-      const errorDetails = document.getElementById('error-details');
-      const canvas = document.getElementById('unity-canvas');
+      // Wait for build.loader.js to load before initializing
+      let unityLoaderLoaded = false;
+      let loaderFailed = false;
+      function initUnity() {
+        if (unityLoaderLoaded) return; // Prevent double init
+        unityLoaderLoaded = true;
+        console.log('=== initUnity() called ===');
+        const loadingScreen = document.getElementById('loading-screen');
+        const gameContainer = document.getElementById('game-container');
+        const errorScreen = document.getElementById('error-screen');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const infoText = document.getElementById('info-text');
+        const errorTitle = document.getElementById('error-title');
+        const errorMessage = document.getElementById('error-message');
+        const errorDetails = document.getElementById('error-details');
+        const canvas = document.getElementById('unity-canvas');
 
-      let unityInstance = null;
-      let loadingStartTime = Date.now();
-      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      const isMobile = isIOS || /Android/i.test(navigator.userAgent);
-      // Force WebGL 1 for all browsers - this build's WebGL 2 shaders are incompatible
-      const forceWebGL1 = window._forceWebGL1 || true;
-      window._forceWebGL1 = true;
+        let unityInstance = null;
+        let loadingStartTime = Date.now();
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const isMobile = isIOS || /Android/i.test(navigator.userAgent);
+        // Force WebGL 1 for all browsers - this build's WebGL 2 shaders are incompatible
+        const forceWebGL1 = window._forceWebGL1 || true;
+        window._forceWebGL1 = true;
 
-      function showError(title, message, details = '') {
+        // Retry tracking to prevent infinite loops
+        const MAX_RETRIES = 3;
+        window._retryCount = window._retryCount || 0;
+
+        // AGGRESSIVE: Force WebGL 1 at browser level by patching getContext
+        // This intercepts ALL webgl2 requests and returns webgl1 instead
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          let requestedType = type;
+          if (forceWebGL1 && (type === 'webgl2' || type === 'experimental-webgl2')) {
+            requestedType = 'webgl';
+          }
+          return originalGetContext.call(this, requestedType, attrs);
+        };
+
+        function showError(title, message, details = '') {
         loadingScreen.style.display = 'none';
         gameContainer.style.display = 'none';
         errorScreen.classList.add('visible');
@@ -211,6 +233,7 @@
       }
 
       function startUnity() {
+        console.log('=== startUnity() called ===');
         const shouldForceWebGL1 = forceWebGL1 || window._shaderErrorRetried || window._memoryErrorRetried;
         
         const config = {
@@ -243,6 +266,33 @@
         if (shouldForceWebGL1) {
           console.log('Using forced WebGL 1 compatibility mode');
           infoText.textContent = 'Compatibility mode: WebGL 1 forced';
+        }
+
+        // DETAILED LOGGING: Log the exact config being passed
+        console.log('=== createUnityInstance config ===', JSON.stringify(config, null, 2));
+
+        // TEST: Verify we can create WebGL 1 context with our attributes
+        if (shouldForceWebGL1) {
+          console.log('=== Testing WebGL 1 context creation ===');
+          const testCanvas = document.createElement('canvas');
+          const testAttrs = {
+            preserveDrawingBuffer: true,
+            powerPreference: "low-power",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            premultipliedAlpha: true,
+          };
+          const gl1test = testCanvas.getContext('webgl', testAttrs) || testCanvas.getContext('experimental-webgl', testAttrs);
+          if (gl1test) {
+            console.log('Test WebGL 1 context SUCCESS:', gl1test.getParameter(gl1test.VERSION));
+            console.log('Test WebGL 1 renderer:', gl1test.getParameter(gl1test.RENDERER));
+            console.log('Test WebGL 1 vendor:', gl1test.getParameter(gl1test.VENDOR));
+          } else {
+            console.error('Test WebGL 1 context FAILED');
+          }
         }
 
         createUnityInstance(canvas, config, (progress) => {
@@ -296,10 +346,11 @@
               details += '\n\nForcing WebGL 1 compatibility mode for retry...';
               
               // Auto-retry with even more restrictive settings for shader errors
-              if (!window._shaderErrorRetried) {
+              if (!window._shaderErrorRetried && window._retryCount < MAX_RETRIES) {
                 window._shaderErrorRetried = true;
                 window._forceWebGL1 = true; // Persist globally
-                console.log('Shader error detected, retrying with forced WebGL 1...');
+                window._retryCount++;
+                console.log('Shader error detected, retrying with forced WebGL 1... (attempt', window._retryCount + ')');
                 setTimeout(() => retryWithMinimalConfig(), 500);
                 return;
               }
@@ -309,9 +360,10 @@
               details += '\n\nThe WASM module tried to access invalid memory. Try: refresh page, clear browser cache, or use a different browser.';
               
               // Auto-retry with minimal config for memory errors
-              if (!window._memoryErrorRetried) {
+              if (!window._memoryErrorRetried && window._retryCount < MAX_RETRIES) {
                 window._memoryErrorRetried = true;
-                console.log('Memory access error detected, retrying with minimal config...');
+                window._retryCount++;
+                console.log('Memory access error detected, retrying with minimal config... (attempt', window._retryCount + ')');
                 setTimeout(() => retryWithMinimalConfig(), 500);
                 return;
               }
@@ -321,12 +373,15 @@
               details += '\n\nRetrying without WebGL version forcing...';
               
               // Clear the force flag and retry normally
-              window._forceWebGL1 = false;
-              window._shaderErrorRetried = false;
-              window._memoryErrorRetried = false;
-              console.log('Context error detected, clearing force flags and retrying...');
-              setTimeout(() => retryLoad(), 500);
-              return;
+              if (window._retryCount < MAX_RETRIES) {
+                window._forceWebGL1 = false;
+                window._shaderErrorRetried = false;
+                window._memoryErrorRetried = false;
+                window._retryCount++;
+                console.log('Context error detected, clearing force flags and retrying... (attempt', window._retryCount + ')');
+                setTimeout(() => retryLoad(), 500);
+                return;
+              }
             }
           }
 
@@ -354,53 +409,85 @@
       // Unity's build.framework.js registers its own touch handlers via JSEvents
 
       window.addEventListener('error', (e) => {
-        if (unityInstance) {
-          // Handle runtime errors after Unity loads
-          if (e.message.includes('Out of bounds memory access') || e.message.includes('out of bounds')) {
-            console.error('Runtime memory access error:', e);
-            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+        // Check for specific errors FIRST (before unityInstance check) to catch loading-phase errors
+        if (e.message.includes('Out of bounds memory access') || e.message.includes('out of bounds')) {
+          console.error('Memory access error:', e);
+          if (window._retryCount < MAX_RETRIES) {
+            window._forceWebGL1 = true;
             window._memoryErrorRetried = true;
-            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', 'This is a build compatibility issue. Forcing WebGL 1 compatibility mode.\n\n' + e.message);
+            window._retryCount++;
+            showError('Runtime Memory Error', 'Memory access violation. Retrying with WebGL 1...', 'This is a build compatibility issue. Forcing WebGL 1 compatibility mode.\n\n' + e.message);
             setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
-          if (e.message.includes('GL.contexts') || e.message.includes('contextHandle') || e.message.includes('GLctx') || e.message.includes('deleteContext') || e.message.includes('destroy_context')) {
-            console.error('WebGL context destruction error:', e);
+        }
+        if (e.message.includes('GL.contexts') || e.message.includes('contextHandle') || e.message.includes('GLctx') || e.message.includes('deleteContext') || e.message.includes('destroy_context')) {
+          console.error('WebGL context destruction error:', e);
+          if (window._retryCount < MAX_RETRIES) {
             window._forceWebGL1 = false;
             window._shaderErrorRetried = false;
             window._memoryErrorRetried = false;
+            window._retryCount++;
             showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', 'Context handle mismatch detected. Clearing compatibility flags.\n\n' + e.message);
             setTimeout(() => retryLoad(), 500);
             return;
           }
         }
+        if (e.message.includes('e.buffer') || e.message.includes('buffer') || e.message.includes('Audio') || e.message.includes('audio') || e.message.includes('decodeAudioData')) {
+          console.error('Audio/buffer error:', e);
+          if (window._retryCount < MAX_RETRIES) {
+            window._bufferErrorRetried = true;
+            window._retryCount++;
+            showError('Audio/Buffer Error', 'Audio buffer or WebAssembly memory error.', 'This may be a WebAudio API issue. Retrying...' + '\n\n' + e.message);
+            setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
+        }
+        
         if (unityInstance) return;
         showError('JavaScript Error', 'An unexpected error occurred.', e.message + '\n' + (e.error?.stack || ''));
       });
 
       window.addEventListener('unhandledrejection', (e) => {
-        if (unityInstance) {
-          const reason = e.reason?.toString() || '';
-          if (reason.includes('Out of bounds memory access') || reason.includes('out of bounds')) {
-            console.error('Runtime memory access rejection:', e.reason);
-            window._forceWebGL1 = true; // Force WebGL 1 on next retry
+        const reason = e.reason?.toString() || '';
+        
+        // Check for specific errors FIRST (before unityInstance check) to catch loading-phase errors
+        if (reason.includes('Out of bounds memory access') || reason.includes('out of bounds')) {
+          console.error('Memory access rejection:', e.reason);
+          if (window._retryCount < MAX_RETRIES) {
+            window._forceWebGL1 = true;
             window._memoryErrorRetried = true;
-            showError('Runtime Memory Error', 'Memory access violation during gameplay. Retrying with WebGL 1...', reason + '\n\nForcing WebGL 1 compatibility mode.');
+            window._retryCount++;
+            showError('Runtime Memory Error', 'Memory access violation. Retrying with WebGL 1...', reason + '\n\nForcing WebGL 1 compatibility mode.');
             setTimeout(() => retryWithMinimalConfig(), 500);
             return;
           }
-          if (reason.includes('GL.contexts') || reason.includes('contextHandle') || reason.includes('GLctx') || reason.includes('deleteContext') || reason.includes('destroy_context')) {
-            console.error('WebGL context destruction rejection:', e.reason);
+        }
+        if (reason.includes('GL.contexts') || reason.includes('contextHandle') || reason.includes('GLctx') || reason.includes('deleteContext') || reason.includes('destroy_context')) {
+          console.error('WebGL context destruction rejection:', e.reason);
+          if (window._retryCount < MAX_RETRIES) {
             window._forceWebGL1 = false;
             window._shaderErrorRetried = false;
             window._memoryErrorRetried = false;
+            window._retryCount++;
             showError('WebGL Context Error', 'WebGL context management error. Retrying without WebGL version forcing...', reason + '\n\nContext handle mismatch detected. Clearing compatibility flags.');
             setTimeout(() => retryLoad(), 500);
             return;
           }
         }
+        if (reason.includes('e.buffer') || reason.includes('buffer') || reason.includes('Audio') || reason.includes('audio') || reason.includes('decodeAudioData')) {
+          console.error('Audio/buffer error:', e.reason);
+          if (window._retryCount < MAX_RETRIES) {
+            window._bufferErrorRetried = true;
+            window._retryCount++;
+            showError('Audio/Buffer Error', 'Audio buffer or WebAssembly memory error.', 'This may be a WebAudio API issue. Retrying...' + '\n\n' + reason);
+            setTimeout(() => retryWithMinimalConfig(), 500);
+            return;
+          }
+        }
+        
         if (unityInstance) return;
-        showError('Promise Rejection', 'An async operation failed.', e.reason?.toString() || '');
+        showError('Promise Rejection', 'An async operation failed.', reason);
       });
 
       canvas.addEventListener('webglcontextlost', (e) => {
@@ -438,6 +525,7 @@
           const maxVertexAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
           const maxVaryingVectors = gl.getParameter(gl.MAX_VARYING_VECTORS);
 
+          console.log('=== Pre-Unity WebGL Detection ===');
           console.log('WebGL version:', version);
           console.log('WebGL renderer:', renderer);
           console.log('WebGL vendor:', vendor);
@@ -445,6 +533,7 @@
           console.log('Max vertex attribs:', maxVertexAttribs);
           console.log('Max varying vectors:', maxVaryingVectors);
           console.log('Is iOS:', isIOS, 'Is Safari:', isSafari);
+          console.log('Using context:', gl2 ? 'WebGL 2' : 'WebGL 1');
 
           // Check for problematic renderers (with null checks)
           if (renderer && typeof renderer === 'string') {
@@ -539,6 +628,32 @@
       if (checkWebGLSupport()) {
         startUnity();
       }
+    }
+    // initUnity() is called via onload on the loader script
+    // Fallback: call initUnity after 5s if onload didn't fire
+    setTimeout(() => {
+      if (!unityLoaderLoaded && !loaderFailed) {
+        console.warn('Loader onload timeout, calling initUnity() anyway');
+        initUnity();
+      }
+    }, 5000);
+
+    function loaderError() {
+      loaderFailed = true;
+      console.error('Failed to load build.loader.js');
+      const loadingScreen = document.getElementById('loading-screen');
+      const errorScreen = document.getElementById('error-screen');
+      const errorTitle = document.getElementById('error-title');
+      const errorMessage = document.getElementById('error-message');
+      const errorDetails = document.getElementById('error-details');
+      if (loadingScreen && errorScreen) {
+        loadingScreen.style.display = 'none';
+        errorScreen.classList.add('visible');
+        errorTitle.textContent = 'Loader Failed';
+        errorMessage.textContent = 'Failed to load Unity loader script. Check network connection.';
+        errorDetails.textContent = 'Could not load Build/build.loader.js. This may be a network issue or server misconfiguration.';
+      }
+    }
     </script>
   </body>
 </html>
