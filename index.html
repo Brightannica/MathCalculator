@@ -213,28 +213,8 @@
         }
       })();
 
-      // Disable IndexedDB/IDBFS to prevent memory corruption from failed sync
-      // This prevents the "Out of bounds memory access" in touchEventHandlerFunc
-      (function() {
-        // Override IDBFactory to return null (disables IndexedDB)
-        if (window.indexedDB) {
-          var origOpen = window.indexedDB.open;
-          window.indexedDB.open = function() {
-            var req = { onerror: null, onsuccess: null, result: null, error: new Error('IndexedDB disabled') };
-            setTimeout(function() {
-              if (req.onerror) {
-                var evt = { target: req, preventDefault: function(){}, stopPropagation: function(){} };
-                req.onerror(evt);
-              }
-            }, 0);
-            return req;
-          };
-        }
-        // Also override unityFileSystemInit to be a no-op
-        window.unityFileSystemInit = function() {
-          console.log('IDBFS disabled - using memory-only filesystem');
-        };
-      })();
+      // Keep IndexedDB enabled for Unity's IDBFS filesystem
+      // (disabling it caused "No GlobalGameManagers file was found" error)
 
       // iOS Safari optimizations
       const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -290,9 +270,6 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
-          unityFileSystemInit: function() {
-            console.log('IDBFS disabled - using memory-only filesystem');
-          },
         };
 
         if (isIOS) {
