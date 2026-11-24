@@ -191,7 +191,6 @@
     <script>
       // CRITICAL: Patch WebGL createShader to never return null
       // This fixes: TypeError: null is not an object (evaluating 'GL.shaders[id].shaderType=...')
-      // Unity's _glCreateShader doesn't check if createShader returns null
       (function() {
         var patchContext = function(proto) {
           if (!proto || !proto.createShader) return;
@@ -199,8 +198,6 @@
           proto.createShader = function(type) {
             var shader = origCreateShader.call(this, type);
             if (!shader) {
-              // createShader returned null - return a dummy to prevent null dereference
-              // Unity will try to compile it and log an error, but won't crash
               try {
                 return origCreateShader.call(this, this.VERTEX_SHADER);
               } catch (e) {
@@ -216,14 +213,31 @@
         }
       })();
 
+      // Disable IndexedDB/IDBFS to prevent memory corruption from failed sync
+      // This prevents the "Out of bounds memory access" in touchEventHandlerFunc
+      // which is caused by IDBFS reconcile writing to invalid memory
+      (function() {
+        // Override IDBFactory to return null (disables IndexedDB)
+        if (window.indexedDB) {
+          var origOpen = window.indexedDB.open;
+          window.indexedDB.open = function() {
+            // Return a fake request that immediately errors
+            var req = { onerror: null, onsuccess: null, result: null, error: new Error('IndexedDB disabled') };
+            setTimeout(function() {
+              if (req.onerror) {
+                var evt = { target: req, preventDefault: function(){}, stopPropagation: function(){} };
+                req.onerror(evt);
+              }
+            }, 0);
+            return req;
+          };
+        }
+      })();
+
       // iOS Safari optimizations
       const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       const isMobile = isIOS || /Android/i.test(navigator.userAgent);
-
-      // Retry tracking
-      window._retryCount = window._retryCount || 0;
-      const MAX_RETRIES = 3;
     </script>
 
     <!-- Script 2: Loader script -->
@@ -299,6 +313,7 @@
           infoText.textContent = `Loaded ${(progress * 180).toFixed(1)}MB of ~180MB • ${elapsed}s elapsed`;
         }).then((instance) => {
           unityInstance = instance;
+          gameLoaded = true; // Enable touch events
           loadingScreen.style.display = 'none';
           gameContainer.style.display = 'block';
           canvas.focus();
@@ -363,9 +378,19 @@
         document.body.style.overflow = 'hidden';
       }
 
-      canvas.addEventListener('touchstart', (e) => {}, { passive: false });
-      canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-      canvas.addEventListener('touchend', (e) => {}, { passive: false });
+      // Prevent touch events from reaching Unity until fully loaded
+      // This prevents the "Out of bounds memory access" in touchEventHandlerFunc
+      let gameLoaded = false;
+      const originalTouchHandler = function(e) {
+        if (!gameLoaded && e && typeof e.preventDefault === 'function') {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      };
+      canvas.addEventListener('touchstart', originalTouchHandler, { capture: true, passive: false });
+      canvas.addEventListener('touchmove', originalTouchHandler, { capture: true, passive: false });
+      canvas.addEventListener('touchend', originalTouchHandler, { capture: true, passive: false });
 
       window.addEventListener('error', (e) => {
         if (unityInstance) return;
@@ -445,7 +470,6 @@
         debugLogs.push({ type, msg, time: new Date().toLocaleTimeString() });
         if (debugLogs.length > MAX_DEBUG_LINES) debugLogs.shift();
         
-        // Only update DOM if panel is visible
         if (debugPanel.classList.contains('visible')) {
           renderDebugLogs();
         }
