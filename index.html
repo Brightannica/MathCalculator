@@ -190,7 +190,7 @@
     <!-- Script 1: CRITICAL patches applied BEFORE loader loads -->
     <script>
       // CRITICAL: Patch WebGL createShader to never return null
-      // This fixes: TypeError: null is not an object (evaluating 'GL.shaders[id].shaderType=...')
+      // AND patch shaderSource/compileShader to handle null shaders
       (function() {
         var patchContext = function(proto) {
           if (!proto || !proto.createShader) return;
@@ -205,6 +205,44 @@
               }
             }
             return shader;
+          };
+
+          // Patch shaderSource to handle null/invalid shaders
+          var origShaderSource = proto.shaderSource;
+          proto.shaderSource = function(shader, source) {
+            if (!shader || !(shader instanceof WebGLShader)) {
+              console.warn('shaderSource called with invalid shader, skipping');
+              return;
+            }
+            return origShaderSource.call(this, shader, source);
+          };
+
+          // Patch compileShader to handle null/invalid shaders
+          var origCompileShader = proto.compileShader;
+          proto.compileShader = function(shader) {
+            if (!shader || !(shader instanceof WebGLShader)) {
+              console.warn('compileShader called with invalid shader, skipping');
+              return;
+            }
+            return origCompileShader.call(this, shader);
+          };
+
+          // Patch getShaderParameter to handle null/invalid shaders
+          var origGetShaderParameter = proto.getShaderParameter;
+          proto.getShaderParameter = function(shader, pname) {
+            if (!shader || !(shader instanceof WebGLShader)) {
+              return null;
+            }
+            return origGetShaderParameter.call(this, shader, pname);
+          };
+
+          // Patch getShaderInfoLog to handle null/invalid shaders
+          var origGetShaderInfoLog = proto.getShaderInfoLog;
+          proto.getShaderInfoLog = function(shader) {
+            if (!shader || !(shader instanceof WebGLShader)) {
+              return '';
+            }
+            return origGetShaderInfoLog.call(this, shader);
           };
         };
         patchContext(WebGLRenderingContext.prototype);
