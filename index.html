@@ -244,6 +244,15 @@
             }
             return origGetShaderInfoLog.call(this, shader);
           };
+
+          // Patch deleteShader to handle null/invalid shaders
+          var origDeleteShader = proto.deleteShader;
+          proto.deleteShader = function(shader) {
+            if (!shader || !(shader instanceof WebGLShader)) {
+              return;
+            }
+            return origDeleteShader.call(this, shader);
+          };
         };
         patchContext(WebGLRenderingContext.prototype);
         if (typeof WebGL2RenderingContext !== 'undefined') {
