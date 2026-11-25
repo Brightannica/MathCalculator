@@ -351,7 +351,7 @@
           productVersion: "1.0",
           webglContextAttributes: {
             preserveDrawingBuffer: true,
-            powerPreference: "high-performance",
+            powerPreference: "default",
             failIfMajorPerformanceCaveat: false,
             alpha: false,
             antialias: true,
@@ -368,6 +368,20 @@
           config.webglContextAttributes.antialias = false;
           config.webglContextAttributes.depth = false;
           config.webglContextAttributes.premultipliedAlpha = true;
+        }
+
+        // Check WebGL context max texture size before starting
+        const testCanvas = document.createElement('canvas');
+        const testGl = testCanvas.getContext('webgl2', config.webglContextAttributes) || testCanvas.getContext('webgl', config.webglContextAttributes);
+        if (testGl) {
+          const maxTex = testGl.getParameter(testGl.MAX_TEXTURE_SIZE);
+          console.log('Pre-flight max texture size:', maxTex);
+          if (maxTex === 0) {
+            // Retry with software rendering disabled
+            config.webglContextAttributes.failIfMajorPerformanceCaveat = false;
+            config.webglContextAttributes.powerPreference = "default";
+            console.log('Max texture size is 0, retrying with default power preference');
+          }
         }
 
         createUnityInstance(canvas, config, (progress) => {
