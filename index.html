@@ -349,25 +349,12 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
-          webglContextAttributes: {
-            preserveDrawingBuffer: true,
-            powerPreference: "default",
-            failIfMajorPerformanceCaveat: false,
-            alpha: false,
-            antialias: true,
-            depth: true,
-            stencil: false,
-            premultipliedAlpha: false,
-          },
+          // webglContextAttributes removed - let Unity use defaults
         };
 
         if (isIOS) {
           config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
           config.matchWebGLToCanvasSize = false;
-          config.webglContextAttributes.powerPreference = "low-power";
-          config.webglContextAttributes.antialias = false;
-          config.webglContextAttributes.depth = false;
-          config.webglContextAttributes.premultipliedAlpha = true;
         }
 
         // Check WebGL context max texture size before starting
