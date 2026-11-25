@@ -413,7 +413,7 @@
               }
             } else if (err.message.includes('WebGL') || err.message.includes('webgl')) {
               title = 'WebGL Error';
-              message = 'WebGL context creation failed. On iOS: ensure iOS 15+, try Private Browsing, or reset Safari settings.';
+              message = 'WebGL context creation failed. On Safari: try Chrome/Firefox, disable "Prevent cross-site tracking", or update macOS.';
             } else if (err.message.includes('fetch') || err.message.includes('network') || err.message.includes('404')) {
               title = 'Network Error';
               message = 'Failed to download game files. Check connection and try again.';
