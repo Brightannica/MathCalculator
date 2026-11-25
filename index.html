@@ -344,26 +344,30 @@
         const config = {
           dataUrl: dataUrl,
           frameworkUrl: "Build/build.framework.js?v=4",
-          codeUrl: "Build/build.wasm?v=2",
+          codeUrl: "Build/build.wasm?v=4",
           streamingAssetsUrl: "StreamingAssets",
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
+          webglContextAttributes: {
+            preserveDrawingBuffer: true,
+            powerPreference: "high-performance",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: true,
+            depth: true,
+            stencil: false,
+            premultipliedAlpha: false,
+          },
         };
 
         if (isIOS) {
           config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
           config.matchWebGLToCanvasSize = false;
-          config.webglContextAttributes = {
-            preserveDrawingBuffer: true,
-            powerPreference: "low-power",
-            failIfMajorPerformanceCaveat: false,
-            alpha: false,
-            antialias: false,
-            depth: false,
-            stencil: false,
-            premultipliedAlpha: true,
-          };
+          config.webglContextAttributes.powerPreference = "low-power";
+          config.webglContextAttributes.antialias = false;
+          config.webglContextAttributes.depth = false;
+          config.webglContextAttributes.premultipliedAlpha = true;
         }
 
         createUnityInstance(canvas, config, (progress) => {
