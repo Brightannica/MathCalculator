@@ -368,15 +368,14 @@
 
         // Check WebGL context max texture size before starting
         const testCanvas = document.createElement('canvas');
-        const testGl = testCanvas.getContext('webgl2', config.webglContextAttributes) || testCanvas.getContext('webgl', config.webglContextAttributes);
+        const testGl = testCanvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false }) || testCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false });
         if (testGl) {
           const maxTex = testGl.getParameter(testGl.MAX_TEXTURE_SIZE);
           console.log('Pre-flight max texture size:', maxTex);
           if (maxTex === 0) {
-            // Retry with software rendering disabled
-            config.webglContextAttributes.failIfMajorPerformanceCaveat = false;
-            config.webglContextAttributes.powerPreference = "default";
-            console.log('Max texture size is 0, retrying with default power preference');
+            console.warn('Max texture size is 0 - WebGL context may be in a bad state');
+            showError('WebGL Context Error', 'WebGL context has invalid max texture size (0).', 'This can happen with restricted GPU access. Try: disable "Prevent cross-site tracking" in Safari settings, or use Chrome/Firefox.');
+            return false;
           }
         }
 
