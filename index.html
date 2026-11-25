@@ -288,7 +288,8 @@
       let unityInstance = null;
       let loadingStartTime = Date.now();
 
-      function showError(title, message, details = '') {
+      function showError(title, message, details) {
+        details = details || '';
         loadingScreen.style.display = 'none';
         gameContainer.style.display = 'none';
         errorScreen.classList.add('visible');
@@ -350,6 +351,9 @@
           return;
         }
 
+        // Force WebGL 1 on Safari - WebGL 2 has issues on Safari
+        const forceWebGL1 = isSafari || isIOS;
+        
         const config = {
           dataUrl: dataUrl,
           frameworkUrl: "Build/build.framework.js?v=4",
@@ -358,7 +362,6 @@
           companyName: "LanPiaoPiao",
           productName: "PlantsVsZombiesRH",
           productVersion: "1.0",
-          // webglContextAttributes removed - let Unity use defaults
         };
 
         if (isIOS) {
@@ -366,20 +369,21 @@
           config.matchWebGLToCanvasSize = false;
         }
 
-        // Check WebGL context max texture size before starting
-        const testCanvas = document.createElement('canvas');
-        const testGl = testCanvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false }) || testCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false });
-        if (testGl) {
-          const maxTex = testGl.getParameter(testGl.MAX_TEXTURE_SIZE);
-          console.log('Pre-flight max texture size:', maxTex);
-          if (maxTex === 0) {
-            console.warn('Max texture size is 0 - WebGL context may be in a bad state');
-            showError('WebGL Context Error', 'WebGL context has invalid max texture size (0).', 'This can happen with restricted GPU access. Try: disable "Prevent cross-site tracking" in Safari settings, or use Chrome/Firefox.');
-            return false;
-          }
+        if (isSafari || isIOS) {
+          config.webglContextAttributes = {
+            preserveDrawingBuffer: true,
+            powerPreference: "default",
+            failIfMajorPerformanceCaveat: false,
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            premultipliedAlpha: true,
+            majorVersion: 1,
+            minorVersion: 0,
+          };
+          console.log('Forcing WebGL 1 on Safari/iOS');
         }
-
-        createUnityInstance(canvas, config, (progress) => {
           const percent = Math.round(progress * 100);
           progressBar.style.width = percent + '%';
           progressText.textContent = `Loading... ${percent}%`;
